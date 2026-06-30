@@ -21,6 +21,10 @@ type Config struct {
 	// 例: "postgres://twin:twin_pass@localhost:5432/twin_switch?sslmode=disable"
 	DatabaseURL string
 
+	// --- Phase 4: マッチング設定 ---
+	MatchmakingTimeout time.Duration // 待機タイムアウト（既定 60s, spec §7.3）
+	WebSocketBaseURL   string        // websocketUrl の基底（既定 "ws://localhost:8080", spec §8.1）
+
 	Game GameConfig // /api/game-config が返す既定値（spec §7.2）
 }
 
@@ -70,14 +74,32 @@ func Load() (*Config, error) {
 	// DATABASE_URL は任意。空ならインメモリ動作（Phase 2 互換）。
 	databaseURL := os.Getenv("DATABASE_URL")
 
+	// MATCHMAKING_TIMEOUT_SEC は任意。空なら 60 秒（spec §7.3）。
+	mmTimeoutStr := os.Getenv("MATCHMAKING_TIMEOUT_SEC")
+	if mmTimeoutStr == "" {
+		mmTimeoutStr = "60"
+	}
+	mmSec, err := strconv.Atoi(mmTimeoutStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid MATCHMAKING_TIMEOUT_SEC: %w", err)
+	}
+
+	// WS_BASE_URL は任意。空なら開発既定（spec §8.1）。
+	wsBaseURL := os.Getenv("WS_BASE_URL")
+	if wsBaseURL == "" {
+		wsBaseURL = "ws://localhost:8080"
+	}
+
 	gameConfig := defaultGameConfig()
 
 	return &Config{
-		Port:        port,
-		JWTSecret:   []byte(jwtSecret),
-		JWTExpiry:   jwtExpiry,
-		DatabaseURL: databaseURL,
-		Game:        gameConfig,
+		Port:               port,
+		JWTSecret:          []byte(jwtSecret),
+		JWTExpiry:          jwtExpiry,
+		DatabaseURL:        databaseURL,
+		MatchmakingTimeout: time.Duration(mmSec) * time.Second,
+		WebSocketBaseURL:   wsBaseURL,
+		Game:               gameConfig,
 	}, nil
 }
 

@@ -7,6 +7,7 @@
 package main
 
 import (
+	"context"  // マッチングのアクターゴルーチンの停止制御に使う
 	"log/slog" // ログ出力用
 	"net/http" // HTTPサーバーを作る標準ライブラリ
 	"os"       // OS関連の処理
@@ -15,9 +16,11 @@ import (
 	"twin-switch-escape/server/internal/config"
 	"twin-switch-escape/server/internal/db"
 	"twin-switch-escape/server/internal/gameconfig"
+	"twin-switch-escape/server/internal/matchmaking"
 	"twin-switch-escape/server/internal/middleware"
 	"twin-switch-escape/server/internal/ranking"
 	"twin-switch-escape/server/internal/repository"
+	"twin-switch-escape/server/internal/room"
 )
 
 func main() {
@@ -49,6 +52,13 @@ func main() {
 	gameConfigHandler := gameconfig.NewHandler(cfg.Game)
 	rankingHandler := ranking.NewHandler(ranking.NewService(matchRepo))
 
+	// マッチング（Phase 4）。RoomManager とマッチングマネージャを生成し、
+	// マッチングの「単一ゴルーチン（アクター）」を起動する（spec §9.3）。
+	roomManager := room.NewManager()
+	mmManager := matchmaking.NewManager(roomManager, cfg.WebSocketBaseURL, cfg.MatchmakingTimeout)
+	go mmManager.Run(context.Background()) // TODO(Phase8): cancel 可能な context にして graceful shutdown
+	mmHandler := matchmaking.NewHandler(mmManager)
+
 	// 4. ルーティング（Go 1.22+ の "METHOD /path" パターン）。
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/register", authHandler.Register)    // ユーザ登録
@@ -57,6 +67,11 @@ func main() {
 	mux.HandleFunc("GET /api/ranking", rankingHandler.Get)        // ランキング
 	// /api/me は要認証 → RequireAuth でラップ。
 	mux.Handle("GET /api/me", middleware.RequireAuth(issuer, http.HandlerFunc(authHandler.Me))) // JWT解析
+
+	// マッチング系（すべて要認証, spec §7.3）。
+	mux.Handle("POST /api/matchmaking/start", middleware.RequireAuth(issuer, http.HandlerFunc(mmHandler.Start)))
+	mux.Handle("GET /api/matchmaking/status", middleware.RequireAuth(issuer, http.HandlerFunc(mmHandler.Status)))
+	mux.Handle("POST /api/matchmaking/cancel", middleware.RequireAuth(issuer, http.HandlerFunc(mmHandler.Cancel)))
 
 	// 5. サーバー起動。
 	srv := &http.Server{
