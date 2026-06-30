@@ -1,10 +1,12 @@
-# Twin Switch Escape - Server (Phase 2: REST API)
+# Twin Switch Escape - Server (Phase 2: REST API / Phase 3: DB連携)
 
-仕様書 `../Twin_Switch_Escape_SPEC.md` の **Phase 2（Go REST API作成）** に対応するバックエンド。
+仕様書 `../Twin_Switch_Escape_SPEC.md` の **Phase 2（Go REST API作成）** および
+**Phase 3（DB連携）** に対応するバックエンド。
 
-- 標準ライブラリ中心（`net/http` + Go 1.22 `ServeMux`）
+- 標準ライブラリ中心（`net/http` + Go 1.22 `ServeMux`, `database/sql`）
 - 認証は JWT（`golang-jwt/jwt/v5`）+ bcrypt
-- データは **インメモリ**保持（Phase 3 で PostgreSQL に差し替え予定）
+- データ層は Repository インターフェースで抽象化し、**インメモリ ⇄ PostgreSQL** を `DATABASE_URL` で切替
+- DB ドライバは pgx の `database/sql` アダプタ（`github.com/jackc/pgx/v5/stdlib`）
 
 > 本ディレクトリは**学習用のひな型**です。各ファイルの `// TODO:` を埋めると動作します。
 > ハンドラ→サービス→リポジトリの依存方向と、各 `panic("TODO...")` を上から潰していくのがおすすめ。
@@ -12,16 +14,21 @@
 ## ディレクトリ
 
 ```
-cmd/api/main.go          エントリポイント（DI とルーティング）
+cmd/api/main.go          エントリポイント（DI とルーティング, リポジトリ切替）
 internal/
-  config/                環境変数の読込・ゲーム設定既定値
+  config/                環境変数の読込・ゲーム設定既定値（DATABASE_URL 含む）
+  db/                    PostgreSQL 接続（database/sql プール, Phase 3）
   httpx/                 JSON / エラーレスポンス共通ヘルパー
   models/                User / Match などのドメインモデル
-  repository/            UserRepository / MatchRepository（インターフェース + インメモリ実装）
+  repository/            UserRepository / MatchRepository
+                         ├ インメモリ実装（Phase 2）
+                         └ PostgreSQL 実装（Phase 3）← 同じインターフェースを満たす
   auth/                  jwt / service / handler（register・login・me）
   middleware/            Bearer トークン検証ミドルウェア
   gameconfig/            GET /api/game-config
   ranking/               GET /api/ranking
+migrations/              DB スキーマ（golang-migrate 形式）+ seed.sql
+docker-compose.yml       開発用 PostgreSQL
 ```
 
 ## 実装の進め方（TODO を埋める順番の目安）
@@ -67,7 +74,55 @@ curl localhost:8080/api/me -H "Authorization: Bearer <accessToken>"
 curl localhost:8080/api/ranking
 ```
 
+## Phase 3: DB 連携（PostgreSQL）
+
+Repository インターフェースはそのままに、実装をインメモリ → PostgreSQL に差し替える。
+`DATABASE_URL` を設定すると Postgres を、空ならインメモリを使う（`main.go` の `buildRepositories`）。
+
+### 1. DB を起動
+
+```bash
+docker compose up -d        # PostgreSQL 16 が localhost:5432 に立つ
+```
+
+### 2. マイグレーション適用（golang-migrate CLI を利用）
+
+```bash
+# CLI 導入（未導入なら）: https://github.com/golang-migrate/migrate
+export DATABASE_URL="postgres://twin:twin_pass@localhost:5432/twin_switch?sslmode=disable"
+migrate -path ./migrations -database "$DATABASE_URL" up
+
+# （任意）動作確認用デモデータ
+psql "$DATABASE_URL" -f migrations/seed.sql
+```
+
+### 3. Postgres モードで起動
+
+```bash
+JWT_SECRET=dev DATABASE_URL="postgres://twin:twin_pass@localhost:5432/twin_switch?sslmode=disable" \
+  go run ./cmd/api
+```
+
+### 実装する TODO（Phase 3 の埋める順番）
+
+1. `internal/db/db.go` … `Open`（`sql.Open("pgx", dsn)` + プール設定 + `Ping`）
+2. `internal/repository/postgres_user_repository.go` … Create / FindByUsername / FindByID
+   - UNIQUE 違反（`23505`）を `ErrUsernameTaken` に変換するのがポイント
+3. `internal/repository/postgres_match_repository.go` … ランキング/集計の JOIN クエリ、Create はトランザクション
+
+> 各ファイルの `// TODO:` に SQL 例と手順を記載済み。インメモリ実装（同パッケージ）が
+> 「期待する振る舞い」のリファレンスになる。
+
+### 設計メモ（重要）
+
+- **ID 型**: spec §12 は id を UUID とする。Phase 2 の `newUserID()` は `"user_xxxx"` を返すため、
+  Phase 3 では (A) 本物の UUID 生成に切替（`github.com/google/uuid` 等, spec 準拠・推奨）か、
+  (B) スキーマの id 列を `VARCHAR(64)` にするか、どちらかへ統一する。
+  `migrations/000001_init_schema.up.sql` の冒頭コメント参照。
+- **ランキングの players**: Postgres では `match_players`→`users` を JOIN して
+  ユーザー名を `Match.PlayerIDs` に詰める（`ranking` 層を無変更に保つため）。
+
 ## スコープ外（後続フェーズ）
 
-- PostgreSQL / マイグレーション（Phase 3）
 - マッチング・WebSocket・チャット・GameState・再接続（Phase 4〜7）
+- Go アプリの Dockerfile 化・graceful shutdown・OpenAPI・テスト（Phase 8）

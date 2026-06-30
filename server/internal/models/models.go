@@ -39,3 +39,6 @@ type Match struct {
 
 // TODO(Phase 3): match_players を独立した構造体/テーブルへ分離する。
 // Phase 2 では Match.PlayerIDs に内包して簡略化している。
+type Match_Player struct {
+	
+}

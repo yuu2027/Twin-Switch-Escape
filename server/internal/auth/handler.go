@@ -14,11 +14,8 @@ type Handler struct {
 	svc *Service
 }
 
-// NewHandler。
-//
-// TODO: *Handler{svc: svc} を返す。
+// *Handler{svc: svc} を返す。
 func NewHandler(svc *Service) *Handler {
-	// TODO: 実装する。
 	return &Handler{
 		svc: svc,
 	}
@@ -55,8 +52,6 @@ type meResponse struct {
 }
 
 // Register: POST /api/register（spec §7.1）。
-//
-// TODO:
 //  1. json.NewDecoder(r.Body).Decode(&req)。失敗→ httpx.WriteError(w, 400, "INVALID_REQUEST", ...)。
 //  2. svc.Register(req.Username, req.Password)。
 //  3. errors.Is で分岐:
@@ -65,7 +60,6 @@ type meResponse struct {
 //     その他           → 500
 //  4. 成功→ httpx.WriteJSON(w, 200, registerResponse{...})。
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
-	// TODO: 実装する。
 	var req registerRequest
 
 	err := json.NewDecoder(r.Body).Decode(&req)
@@ -95,13 +89,10 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 }
 
 // Login: POST /api/login（spec §7.1）。
-//
-// TODO:
 //  1. body をデコード。
 //  2. svc.Login(...)。ErrInvalidCredentials → 401 "INVALID_CREDENTIALS"、その他→500。
 //  3. 成功→ 200 loginResponse{accessToken, userId, username}。
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
-	// TODO: 実装する。
 	var req loginRequest
 
 	err := json.NewDecoder(r.Body).Decode(&req)
@@ -116,6 +107,8 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteError(w, http.StatusUnauthorized, "INVALID_CREDENTIALS", "invalid username or password") // 401
 			return
 		}
+		httpx.WriteError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
+		return
 	}
 
 	httpx.WriteJSON(w, http.StatusOK, loginResponse{
@@ -127,13 +120,10 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 // Me: GET /api/me（要認証, spec §7.1）。
 // 認証ミドルウェアが context に入れた userId を取り出して使う。
-//
-// TODO:
 //  1. userID := middleware.UserIDFromContext(r.Context())。空なら 401。
 //  2. svc.Me(userID)。エラー→500（または401）。
 //  3. 成功→ 200 meResponse{...}。
 func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
-	// TODO: 実装する。
 	userID := middleware.UserIDFromContext(r.Context())
 	if userID == "" {
 		httpx.WriteError(w, http.StatusUnauthorized, "INTERNAL_ERROR", "internal server error") // 401

@@ -2,12 +2,11 @@
 package auth
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"time"
 
 	// パスワードハッシュは golang.org/x/crypto/bcrypt を使う（spec §17.1）。
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
 	"twin-switch-escape/server/internal/models"
@@ -144,17 +143,7 @@ func (s *Service) Me(userID string) (username string, bestClearTimeSec float64, 
 	return u.Username, bestClearTimeSec, clearCount, nil
 }
 
-// "user_xxxx" 形式の ID を生成する。
-//   - crypto/rand で 8〜16 バイト読み、encoding/hex か base64(URLエンコード) で文字列化。
-//   - "user_" を prefix に付けて返す。
-//
-// ID やトークンの乱数は math/rand ではなく crypto/rand を使う（予測困難にする）。
+// UUIDによりデータを一意に識別する
 func newUserID() string {
-	b := make([]byte, 16)
-
-	if _, err := rand.Read(b); err != nil { // 乱数生成
-		panic(err)
-	}
-
-	return "user_" + hex.EncodeToString(b) // 文字列に変換
+	return uuid.NewString()
 }

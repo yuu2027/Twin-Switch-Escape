@@ -13,6 +13,7 @@ import (
 
 	"twin-switch-escape/server/internal/auth"
 	"twin-switch-escape/server/internal/config"
+	"twin-switch-escape/server/internal/db"
 	"twin-switch-escape/server/internal/gameconfig"
 	"twin-switch-escape/server/internal/middleware"
 	"twin-switch-escape/server/internal/ranking"
@@ -32,11 +33,14 @@ func main() {
 		os.Exit(1) // 異常終了
 	}
 
-	// 2. リポジトリ初期化（インメモリ）。
-	// Repository:データの保存・取得を担当する部品
-	userRepo := repository.NewInMemoryUserRepository()
-	matchRepo := repository.NewInMemoryMatchRepository()
-	matchRepo.SeedDemoMatches() // ランキングが空配列にならないようデモ投入（Phase 2 限定）。
+	// 2. リポジトリ初期化。
+	// DATABASE_URL があれば PostgreSQL、空ならインメモリ（Phase 2 互換）。
+	userRepo, matchRepo, closeRepos, err := buildRepositories(cfg)
+	if err != nil {
+		slog.Error("failed to init repositories", "err", err)
+		os.Exit(1)
+	}
+	defer closeRepos()
 
 	// 3. サービス/ハンドラ組み立て（依存注入）。
 	issuer := auth.NewTokenIssuer(cfg.JWTSecret, cfg.JWTExpiry)
@@ -67,4 +71,31 @@ func main() {
 	}
 
 	// TODO(Phase 8): context を使った graceful shutdown（SIGINT/SIGTERM 受信→srv.Shutdown）。
+}
+
+// buildRepositories は設定に応じて Repository を組み立てる（Phase 3）。
+// 返り値の close 関数は defer で呼ぶ（DB プールのクローズ用。インメモリ時は no-op）。
+//
+// 学習ポイント:
+//   - 戻り値はインターフェース型なので、上位層（auth / ranking）は実装を知らずに使える。
+//     インメモリ ⇄ Postgres の切り替えがこの関数の中だけで完結する。
+func buildRepositories(cfg *config.Config) (repository.UserRepository, repository.MatchRepository, func(), error) {
+	// DATABASE_URL が空 → インメモリ（Phase 2 互換）。
+	if cfg.DatabaseURL == "" {
+		slog.Info("using in-memory repositories")
+		matchRepo := repository.NewInMemoryMatchRepository()
+		matchRepo.SeedDemoMatches() // ランキングが空配列にならないようデモ投入。
+		return repository.NewInMemoryUserRepository(), matchRepo, func() {}, nil
+	}
+
+	// DATABASE_URL あり → PostgreSQL。
+	slog.Info("using PostgreSQL repositories")
+	pool, err := db.Open(cfg.DatabaseURL)
+	if err != nil {
+		return nil, nil, func() {}, err
+	}
+	userRepo := repository.NewPostgresUserRepository(pool)
+	matchRepo := repository.NewPostgresMatchRepository(pool)
+	// Postgres のデモデータは migrations/seed.sql で投入する（コードでは seed しない）。
+	return userRepo, matchRepo, func() { _ = pool.Close() }, nil
 }

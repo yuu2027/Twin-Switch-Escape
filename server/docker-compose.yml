@@ -1,0 +1,31 @@
+# Phase 3: 開発用 PostgreSQL（spec §3.2 / §18 Phase3「PostgreSQL導入」）。
+# 起動: docker compose up -d
+# 停止: docker compose down            （データは volume に残る）
+# 全消し: docker compose down -v        （volume も削除）
+#
+# 接続文字列（アプリの DATABASE_URL に設定する）:
+#   postgres://twin:twin_pass@localhost:5432/twin_switch?sslmode=disable
+#
+# 注意: Go アプリ自体のコンテナ化（Dockerfile）は spec では Phase 8（仕上げ）の範囲。
+# ここでは Phase 3 に必要な DB だけを立てる。
+
+services:
+  db:
+    image: postgres:16-alpine # PostgreSQL 16 の軽量版イメージ
+    container_name: twin_switch_db # コンテナの名前
+    environment:
+      POSTGRES_USER: twin # DBのユーザ名
+      POSTGRES_PASSWORD: twin_pass # パスワード
+      POSTGRES_DB: twin_switch # DB名
+    ports:
+      - "5432:5432" # ポート番号
+    volumes:
+      - twin_pgdata:/var/lib/postgresql/data # 保存先
+    healthcheck: # DBが正常に起動しているか確認
+      test: ["CMD-SHELL", "pg_isready -U twin -d twin_switch"]
+      interval: 5s # 5秒ごとに確認
+      timeout: 3s # 3秒以内に応答しなければ失敗
+      retries: 5 # 5回連続で失敗ならコンテナが不健康
+
+volumes:
+  twin_pgdata:

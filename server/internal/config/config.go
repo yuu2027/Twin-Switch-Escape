@@ -16,6 +16,11 @@ type Config struct {
 	JWTSecret []byte        // JWT 署名鍵（必須・未設定なら起動失敗させる）
 	JWTExpiry time.Duration // アクセストークン有効期限（既定 24h, spec §17.1）
 
+	// DatabaseURL は PostgreSQL 接続文字列（Phase 3）。
+	// 空ならインメモリ Repository を使う（Phase 2 互換）。設定があれば Postgres を使う。
+	// 例: "postgres://twin:twin_pass@localhost:5432/twin_switch?sslmode=disable"
+	DatabaseURL string
+
 	Game GameConfig // /api/game-config が返す既定値（spec §7.2）
 }
 
@@ -62,13 +67,17 @@ func Load() (*Config, error) {
 
 	jwtExpiry := time.Duration(hours) * time.Hour
 
+	// DATABASE_URL は任意。空ならインメモリ動作（Phase 2 互換）。
+	databaseURL := os.Getenv("DATABASE_URL")
+
 	gameConfig := defaultGameConfig()
 
 	return &Config{
-		Port:      port,
-		JWTSecret: []byte(jwtSecret),
-		JWTExpiry: jwtExpiry,
-		Game:      gameConfig,
+		Port:        port,
+		JWTSecret:   []byte(jwtSecret),
+		JWTExpiry:   jwtExpiry,
+		DatabaseURL: databaseURL,
+		Game:        gameConfig,
 	}, nil
 }
 
